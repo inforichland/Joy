@@ -1,7 +1,7 @@
 ! Copyright (C) 2009 Tim Wawrzynczak
 ! See http://factorcode.org/license.txt for BSD license.
 USING: kernel arrays strings joy.ast make combinators
-accessors sequences math.parser prettyprint quotations ;
+accessors sequences math.parser prettyprint quotations math ;
 IN: joy.pprint
 
 ! pretty-printing of a joy AST
