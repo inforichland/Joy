@@ -9,7 +9,7 @@ parser words stack-checker ;
 
 IN: joy.eval
 
-TUPLE: joy-env env { dstack vector } { rstack vector } ;
+TUPLE: joy-env env { dstack vector } { rstack vector } { quotation-depth fixnum } ;
 
 SYMBOL: joy
 
@@ -26,9 +26,6 @@ MACRO: preserving ( quot -- )
     [ preserving ] 2dip if ; inline
 
 ! words for dealing with the joy environment
-
-: default-env ( -- env )
-    [ ] H{ } make-assoc ;
 
 : dstack-empty? ( -- ? )
     joy get dstack>> empty? ;
@@ -48,9 +45,13 @@ MACRO: preserving ( quot -- )
     joy get env>> at
     [ call ] [ "Invalid word!" throw ] if* ; inline
 
-: add-word-to-env ( [quot-name] -- )
-    [ first ] [ second ] bi
+: add-word-to-env ( [name-quot] -- )
+    [ second ] [ first ] bi
     joy get env>> set-at ;
+
+: incr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 + >>quotation-depth joy set ;
+: decr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 - >>quotation-depth joy set ;
+: get-quotation-depth ( -- n ) joy get quotation-depth>> ; inline
 
 ! generic eval word
 
@@ -66,10 +67,13 @@ M: ast-character (@eval) ( ast -- )
     char>> dstack-push ; inline
 
 M: ast-identifier (@eval) ( ast -- )
-    name>> eval-identifier ; inline
+    get-quotation-depth 0 =
+    [ name>> eval-identifier ] when ; inline
 
 M: ast-quotation (@eval) ( ast -- )
-    body>> >quotation dstack-push ; inline
+    incr-quotation-depth
+    body>> >quotation dstack-push
+    decr-quotation-depth ; inline
 
 M: ast-special (@eval) ( ast -- )
     value>> eval-identifier ; inline
@@ -94,6 +98,15 @@ M: ast-boolean (@eval) ( ast -- )
 ! *************************************
 ! words you can use
 ! *************************************
+
+! combinators
+: (i-joy) ( quot -- )
+    [ (@eval) ] each ; inline 
+
+: i-joy ( -- )
+    dstack-pop* dup
+    quotation?
+    [ (i-joy) ] [ drop "Not a quotation!" throw ] if ; inline
 
 ! stack shuffling words
 
@@ -201,7 +214,7 @@ M: ast-boolean (@eval) ( ast -- )
 : neg-joy ( -- ) [ 0 swap - ] unop ; inline
 : abs-joy ( -- ) [ abs ] unop ; inline
 
-! trig functions
+! trigish functions
 
 : cos-joy ( -- ) [ cos ] unop ; inline
 : sin-joy ( -- ) [ sin ] unop ; inline
@@ -212,6 +225,55 @@ M: ast-boolean (@eval) ( ast -- )
 : cosh-joy ( -- ) [ cosh ] unop ; inline
 : sinh-joy ( -- ) [ sinh ] unop ; inline
 : tanh-joy ( -- ) [ tanh ] unop ; inline
+: log-joy ( -- ) [ log ] unop ; inline
+: log10-joy ( -- ) [ log 10 log / ] unop ; inline ! change of base formula
+: pow-joy ( -- ) [ ^ ] binop ; inline
+: sqrt-joy ( -- ) [ sqrt ] unop ; inline
+
+! list (quotation) operations
+: cons-joy ( -- ) [ swap prefix ] binop ; inline
+: swons-joy ( -- ) [ prefix ] binop ; inline
+: first-joy ( -- ) [ first ] unop ; inline
+: rest-joy ( -- ) [ rest ] unop ; inline
+: of-joy ( -- ) [ nth ] binop ; inline
+: at-joy ( -- ) [ swap nth ] binop ; inline
+: size-joy ( -- ) [ length ] unop ; inline
+: uncons-joy ( -- ) [ dup rest [ first ] dip ] unop dstack-push ; inline
+: drop-joy ( -- ) [ tail ] binop ; inline
+: take-joy ( -- ) [ head ] binop ; inline
+: concat-joy ( -- ) [ append ] binop ; inline
+: enconcat-joy ( -- )
+    dstack-pop* dstack-pop* dstack-pop*
+    [ swap ] dip swap prefix append
+    dstack-push ; inline
+: null-joy ( -- ) ! empty aggregate or zero (0)
+    dstack-pop*
+    {
+        { [ dup quotation? ] [ empty? dstack-push ] }
+        { [ dup number? ] [ 0 = dstack-push ] }
+        [ drop "Invalid operands for 'null'!" throw ]
+    } cond ; inline
+: small-joy ( -- ) ! 0/1 elements, or numeric one/zero
+    dstack-pop*
+    {
+        { [ dup quotation? ] [ length [ 0 = ] [ 1 = ] bi or dstack-push ] }
+        { [ dup number? ] [ [ 0 = ] [ 1 = ] bi or dstack-push ] }
+        [ drop "Invalid operands for 'small'!" throw ]
+    } cond ; inline
+: has-joy ( -- )
+    dstack-pop* dstack-pop* ! thing seq --
+    member? dstack-push ; inline
+: in-joy ( -- )
+    dstack-pop* dstack-pop*
+    member? dstack-push ; inline
+
+! relational operators
+: >=-joy ( -- ) [ >= ] binop ; inline
+: <=-joy ( -- ) [ <= ] binop ; inline
+: <-joy ( -- ) [ < ] binop ; inline
+: >-joy ( -- ) [ > ] binop ; inline
+: !=-joy ( -- ) [ = not ] binop ; inline
+: =-joy ( -- ) [ = ] binop ; inline    
 
 ! binary operations
 
@@ -231,68 +293,94 @@ M: ast-boolean (@eval) ( ast -- )
 : min-joy ( -- ) [ min ] binop ; inline
 
 ! regenerate the environment
-: (env) ( -- )
+: default-env ( -- env )
+    H{
+        { "+"    [ +-joy ] }
+        { "-"    [ --joy ] }
+        { "*"    [ *-joy ] }
+        { "/"    [ /-joy ] }
+        { "rand" [ rand-joy ] }
+        { "time" [ time-joy ] }
+        
+        { "dup"       [ dup-joy ] }
+        { "swap"      [ swap-joy ] }
+        { "dip"       [ dip-joy ] }
+        { "pop"       [ pop-joy ] }
+        { "."         [ print-joy ] }
+        { "rollup"    [ rollup-joy ] }
+        { "rolldown"  [ rolldown-joy ] }
+        { "rotate"    [ rotate-joy ] }
+        { "dupd"      [ dupd-joy ] }
+        { "swapd"     [ swapd-joy ] }
+        { "rollupd"   [ rollupd-joy ] }
+        { "rolldownd" [ rolldownd-joy ] }
+        { "rotated"   [ rotated-joy ] }
+        { "popd"      [ popd-joy ] }
+        { "id"        [ id-joy ] }
+        
+        { "or"  [ or-joy ] }
+        { "and" [ and-joy ] }
+        { "xor" [ xor-joy ] }
+        
+        { "rem"   [ rem-joy ] }
+        { "div"   [ div-joy ] }
+        { "sign"  [ sign-joy ] }
+        { "neg"   [ neg-joy ] }
+        { "ceil"  [ ceil-joy ] }
+        { "floor" [ floor-joy ] }
+        { "abs"   [ abs-joy ] }
+        { "exp"   [ exp-joy ] }
+        { "trunc" [ trunc-joy ] } 
+        { "pred"  [ pred-joy ] }
+        { "succ"  [ succ-joy ] }
+        { "max"   [ max-joy ] }
+        { "min"   [ min-joy ] }
+        
+        { "cos"   [ cos-joy ] }
+        { "sin"   [ sin-joy ] }
+        { "tan"   [ tan-joy ] }
+        { "cosh"  [ cosh-joy ] }
+        { "sinh"  [ sinh-joy ] }
+        { "tanh"  [ tanh-joy ] }
+        { "acos"  [ acos-joy ] }
+        { "asin"  [ asin-joy ] }
+        { "atan"  [ atan-joy ] }
+        { "log"   [ log-joy ] }
+        { "log10" [ log10-joy ] }
+        { "pow"   [ pow-joy ] }
+
+        { "cons"     [ cons-joy ] }
+        { "swons"    [ swons-joy ] }
+        { "first"    [ first-joy ] }
+        { "rest"     [ rest-joy ] }
+        { "of"       [ of-joy ] }
+        { "at"       [ at-joy ] }
+        { "size"     [ size-joy ] }
+        { "uncons"   [ uncons-joy ] }
+        { "i"        [ i-joy ] }
+        { "drop"     [ drop-joy ] }
+        { "take"     [ take-joy ] }
+        { "concat"   [ concat-joy ] }
+        { "enconcat" [ enconcat-joy ] }
+        { "null"     [ null-joy ] }
+        { "small"    [ small-joy ] }
+        { "in"       [ in-joy ] }
+        { "has"      [ has-joy ] }
+
+        { ">=" [ >=-joy ] }
+        { "<=" [ <=-joy ] }
+        { "<" [ <-joy ] }
+        { ">" [ >-joy ] }
+        { "=" [ =-joy ] }
+        { "!=" [ !=-joy ] }
+    } ;
+        
+: env ( -- )
     joy-env new default-env >>env
     V{ } clone >>dstack
     V{ } clone >>rstack
+    0 >>quotation-depth
     joy set ;
-
-: env ( -- )
-    (env)
-    ! add words to the environment
-    {
-        { [ +-joy ] "+" }
-        { [ --joy ] "-" }
-        { [ *-joy ] "*" }
-        { [ /-joy ] "/" }
-        { [ rand-joy ] "rand" }
-        { [ time-joy ] "time" }
-
-        { [ dup-joy ] "dup" }
-        { [ swap-joy ] "swap" }
-        { [ dip-joy ] "dip" }
-        { [ pop-joy ] "pop" }
-        { [ print-joy ] "." }
-        { [ rollup-joy ] "rollup" }
-        { [ rolldown-joy ] "rolldown" }
-        { [ rotate-joy ] "rotate" }
-        { [ dupd-joy ] "dupd" }
-        { [ swapd-joy ] "swapd" }
-        { [ rollupd-joy ] "rollupd" }
-        { [ rolldownd-joy ] "rolldownd" }
-        { [ rotated-joy ] "rotated" }
-        { [ popd-joy ] "popd" }
-        { [ id-joy ] "id" }
-
-        { [ or-joy ] "or" }
-        { [ and-joy ] "and" }
-        { [ xor-joy ] "xor" }
-
-        { [ rem-joy ] "rem" }
-        { [ div-joy ] "div" }
-        { [ sign-joy ] "sign" }
-        { [ neg-joy ] "neg" }
-        { [ ceil-joy ] "ceil" }
-        { [ floor-joy ] "floor" }
-        { [ abs-joy ] "abs" }
-        { [ exp-joy ] "exp" }
-        { [ trunc-joy ] "trunc" }
-        { [ pred-joy ] "pred" }
-        { [ succ-joy ] "succ" }
-        { [ max-joy ] "max" }
-        { [ min-joy ] "min" }
-
-        { [ cos-joy ] "cos" }
-        { [ sin-joy ] "sin" }
-        { [ tan-joy ] "tan" }
-        { [ cosh-joy ] "cosh" }
-        { [ sinh-joy ] "sinh" }
-        { [ tanh-joy ] "tanh" }
-        { [ acos-joy ] "acos" }
-        { [ asin-joy ] "asin" }
-        { [ atan-joy ] "atan" }
-        
-    } [ add-word-to-env ] each ;
 
 ! actual eval 
 

@@ -1,24 +1,30 @@
 ! Copyright (C) 2009 Tim Wawrzynczak
 ! See http://factorcode.org/license.txt for BSD license.
 USING: kernel arrays strings joy.ast make combinators
-accessors sequences math.parser prettyprint ;
+accessors sequences math.parser prettyprint quotations ;
 IN: joy.pprint
 
 ! pretty-printing of a joy AST
 
 GENERIC: (@pprint) ( ast -- )
 
+M: quotation (@pprint) ( quot -- )
+    "[ " % [ (@pprint) " " % ] each "]" % ;
+
 M: object (@pprint) ( obj -- )
      unparse , ;
 
 M: ast-quotation (@pprint) ( ast -- )
-    CHAR: [ , " " % body>> [ (@pprint) " " % ] each CHAR: ] , ;
+     "[ " % body>> [ (@pprint) " " % ] each " ]" % ;
 
 M: ast-string (@pprint) ( ast -- )
     CHAR: " , string>> % CHAR: " , ;
 
 M: ast-character (@pprint) ( ast -- )
     CHAR: ' , char>> , ;
+
+M: number (@pprint) ( num -- )
+    # ;
 
 M: ast-number (@pprint) ( ast -- )
     num>> # ;

@@ -52,6 +52,9 @@ StringLiteralCharacter = [^"]
 Boolean = "true" | "false"
 BooleanLiteral = Boolean:b => [[ b >string "true" = ast-boolean boa ]]
 
+Relational = ">=" | ">" | "<=" | "<" | "=" | "!="
+RelationalLiteral = Relational:r => [[ r >string ast-identifier boa ]]                                             
+                   
 IdentifierLiteral = Identifier:i => [[ i >string ast-identifier boa ]]
 
 ModuleKeywords = "DEFINE" | "MODULE" | "IN" | "LIBRA" | "HIDE" | "PRIVATE"
@@ -62,6 +65,7 @@ SpecialLiteral = Special:s OptionalWhitespace => [[ s >string ast-special boa ]]
 BuiltinIdentifierLiteral = ("+" | "-" | "*" | "/"):i => [[ i >string ast-identifier boa ]]
 
 AnyLiteral = ModuleKeywordLiteral |
+             RelationalLiteral |
              BooleanLiteral |
              BuiltinIdentifierLiteral |
              SpecialLiteral |
