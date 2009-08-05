@@ -62,6 +62,8 @@ MACRO: preserving ( quot -- )
 
 ! generic eval word
 
+M: object (@eval) ( obj -- ) dstack-push ;
+
 M: ast-definitions (@eval) ( ast -- )
     definitions>> [ ast-definition? ] filter [ (@eval) ] each ; inline
 
@@ -423,4 +425,8 @@ M: ast-boolean (@eval) ( ast -- )
 
 : eval ( string -- )
     env ! new environment
-    (eval) ;
+    (eval) ! evaluate
+    joy get dstack>> 0 joy get rstack>> copy
+    joy get V{ } clone >>dstack
+    rstack>> [ (@eval) ] each
+    joy get V{ } clone >>rstack drop ;
