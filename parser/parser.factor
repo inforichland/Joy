@@ -57,18 +57,18 @@ RelationalLiteral = Relational:r => [[ r >string ast-identifier boa ]]
                    
 IdentifierLiteral = Identifier:i => [[ i >string ast-identifier boa ]]
 
-ModuleKeywords = "DEFINE" | "MODULE" | "IN" | "LIBRA" | "HIDE" | "PRIVATE"
-ModuleKeywordLiteral = ModuleKeywords:m => [[ m >string ast-module-keyword boa ]]
-Special = "==" | ";" | "."
-SpecialLiteral = Special:s OptionalWhitespace => [[ s >string ast-special boa ]]
-
 BuiltinIdentifierLiteral = ("+" | "-" | "*" | "/"):i => [[ i >string ast-identifier boa ]]
 
-AnyLiteral = ModuleKeywordLiteral |
-             RelationalLiteral |
+Definition = Identifier:i OptionalWhitespace "==" (Expression)+:j
+                                              => [[ i >string j >array ast-definition boa ]]
+
+Defines = "DEFINE" Whitespace (Definition OptionalWhitespace ";")*:d OptionalWhitespace
+                              Definition:e OptionalWhitespace "."
+                              => [[ d dup empty? [ drop e 1array ] [ first e suffix ] if ast-definitions boa ]]
+                                              
+AnyLiteral = RelationalLiteral |
              BooleanLiteral |
              BuiltinIdentifierLiteral |
-             SpecialLiteral |
              QuotationLiteral |
              SetLiteral |
              IntegerLiteral |
@@ -79,7 +79,7 @@ AnyLiteral = ModuleKeywordLiteral |
 Expression = OptionalWhitespace
              AnyLiteral:e => [[ e ]]
 
-Code = ( Expression:e OptionalWhitespace => [[ e ]])*:h OptionalWhitespace => [[ h ]]
+Code = ( (Defines | Expression):e OptionalWhitespace => [[ e ]])*:h OptionalWhitespace => [[ h ]]
 
 ;EBNF
          

@@ -7,6 +7,7 @@ IN: joy.ast
 
 TUPLE: ast-quotation      { body array } ;
 TUPLE: ast-definition     { name string } { body array } ;
+TUPLE: ast-definitions    definitions ;
 TUPLE: ast-string         { string string } ;
 TUPLE: ast-character      { char string } ;
 TUPLE: ast-number         { num number } ;

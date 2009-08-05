@@ -5,13 +5,15 @@ joy.ast joy.parser joy.pprint vectors
 combinators math assocs math.ranges random 
 quotations prettyprint math.functions 
 calendar math.order macros generalizations fry 
-parser words stack-checker ;
+parser words stack-checker strings ;
 
 IN: joy.eval
 
-TUPLE: joy-env env { dstack vector } { rstack vector } { quotation-depth fixnum } ;
+TUPLE: joy-env env user-env { dstack vector } { rstack vector } { quotation-depth fixnum } ;
 
 SYMBOL: joy
+
+GENERIC: (@eval) ( ast -- )
 
 ! 
 ! utilities
@@ -41,13 +43,18 @@ MACRO: preserving ( quot -- )
 
 ! evaluation
 
-: eval-identifier ( identifier -- )
-    joy get env>> at
-    [ call ] [ "Invalid word!" throw ] if* ; inline
+: user-eval ( user-word -- )
+    [ (@eval) ] each ;
 
-: add-word-to-env ( [name-quot] -- )
-    [ second ] [ first ] bi
-    joy get env>> set-at ;
+: eval-identifier ( identifier -- )
+    {
+        { [ dup joy get env>> at ]      [ joy get env>> at call ] }
+        { [ dup joy get user-env>> at ] [ joy get user-env>> at user-eval ] }
+        [ 2drop "Invalid word!" throw ]
+    } cond ; inline
+
+: add-word-to-user-env ( name quot -- )
+    joy get user-env>> set-at ;
 
 : incr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 + >>quotation-depth joy set ;
 : decr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 - >>quotation-depth joy set ;
@@ -55,7 +62,11 @@ MACRO: preserving ( quot -- )
 
 ! generic eval word
 
-GENERIC: (@eval) ( ast -- )
+M: ast-definitions (@eval) ( ast -- )
+    definitions>> [ ast-definition? ] filter [ (@eval) ] each ; inline
+
+M: ast-definition (@eval) ( ast -- )
+    [ body>> ] [ name>> ] bi add-word-to-user-env ; inline
 
 M: ast-string (@eval) ( ast -- )
     string>> dstack-push ; inline
@@ -84,6 +95,7 @@ M: ast-boolean (@eval) ( ast -- )
 !
 ! helper functions
 !
+
 : unop ( quot -- )
     dstack-pop*
     swap call
@@ -292,6 +304,18 @@ M: ast-boolean (@eval) ( ast -- )
 : max-joy ( -- ) [ max ] binop ; inline
 : min-joy ( -- ) [ min ] binop ; inline
 
+! predicate words
+: integer-joy ( -- ) [ number? ] unop ; inline
+: char-joy ( -- ) [ [ string? ] [ length 1 = ] bi and ] unop ; inline
+: logical-joy ( -- ) [ boolean? ] unop ; inline
+! : set-joy ( -- )  :TODO:
+: string-joy ( -- ) [ string? ] unop ; inline
+: list-joy ( -- ) [ quotation? ] unop ; inline
+: leaf-joy ( -- ) [ quotation? not ] unop ; inline
+! : user
+! : float
+! : file
+
 ! regenerate the environment
 : default-env ( -- env )
     H{
@@ -373,12 +397,21 @@ M: ast-boolean (@eval) ( ast -- )
         { ">" [ >-joy ] }
         { "=" [ =-joy ] }
         { "!=" [ !=-joy ] }
+
+        { "integer" [ integer-joy ] }
+        { "char-joy" [ char-joy ] }
+        { "logical" [ logical-joy ] }
+        { "string" [ string-joy ] }
+        { "list" [ list-joy ] }
+        { "leaf" [ leaf-joy ] }
+        
     } ;
         
 : env ( -- )
     joy-env new default-env >>env
     V{ } clone >>dstack
     V{ } clone >>rstack
+    H{ } clone >>user-env
     0 >>quotation-depth
     joy set ;
 
