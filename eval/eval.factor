@@ -5,7 +5,8 @@ joy.ast joy.parser joy.pprint vectors
 combinators math assocs math.ranges random 
 quotations prettyprint math.functions 
 calendar math.order macros generalizations fry 
-parser words stack-checker strings ;
+parser words stack-checker strings io.encodings.utf8 
+io io.files destructors ;
 
 IN: joy.eval
 
@@ -62,7 +63,7 @@ MACRO: preserving ( quot -- )
 
 ! generic eval word
 
-M: object (@eval) ( obj -- ) dstack-push ;
+M: object (@eval) ( obj -- ) dstack-push ; inline
 
 M: ast-definitions (@eval) ( ast -- )
     definitions>> [ ast-definition? ] filter [ (@eval) ] each ; inline
@@ -278,7 +279,7 @@ M: ast-boolean (@eval) ( ast -- )
     dstack-pop* dstack-pop* ! thing seq --
     member? dstack-push ; inline
 : in-joy ( -- )
-    dstack-pop* dstack-pop*
+    dstack-pop* dstack-pop* swap ! seq thing
     member? dstack-push ; inline
 
 ! relational operators
@@ -317,6 +318,15 @@ M: ast-boolean (@eval) ( ast -- )
 ! : user
 ! : float
 ! : file
+
+! file words
+: fopen-joy ( -- )
+    dstack-pop* drop dstack-pop* ! mode pathname --
+    dup [ string? ] [ exists? ] bi and
+    [ utf8 <file-writer>  ] [ "Files does not exist!" throw ] if
+    dstack-push ; inline
+: fclose-joy ( -- )
+    dstack-pop* dispose ;
 
 ! regenerate the environment
 : default-env ( -- env )
@@ -406,6 +416,10 @@ M: ast-boolean (@eval) ( ast -- )
         { "string" [ string-joy ] }
         { "list" [ list-joy ] }
         { "leaf" [ leaf-joy ] }
+
+        { "fopen" [ fopen-joy ] }
+        { "fclose" [ fclose-joy ] }
+        
         
     } ;
         
@@ -421,12 +435,15 @@ M: ast-boolean (@eval) ( ast -- )
 
 : (eval) ( string -- )
     parse-joy
-    [ (@eval) ] each ;
+    [ (@eval) ] each ; inline
 
 : eval ( string -- )
     env ! new environment
     (eval) ! evaluate
-    joy get dstack>> 0 joy get rstack>> copy
-    joy get V{ } clone >>dstack
-    rstack>> [ (@eval) ] each
-    joy get V{ } clone >>rstack drop ;
+    ! now clean up the stack, in case any
+    ! raw ast- tuples are left on it
+    ! (from being removed from a quotation)
+    joy get dstack>> 0 joy get rstack>> copy ! copy dstack to rstack
+    joy get V{ } clone >>dstack ! clear the dstack
+    rstack>> [ (@eval) ] each ! re-evaluate the stack
+    joy get V{ } clone >>rstack drop ; ! clear the rstack
