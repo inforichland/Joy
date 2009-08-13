@@ -6,7 +6,7 @@ combinators math assocs math.ranges random
 quotations prettyprint math.functions 
 calendar math.order macros generalizations fry 
 parser words stack-checker strings io.encodings.utf8 
-io io.files destructors ;
+io io.files destructors arrays io.directories continuations ;
 
 IN: joy.eval
 
@@ -45,7 +45,7 @@ MACRO: preserving ( quot -- )
 ! evaluation
 
 : user-eval ( user-word -- )
-    [ (@eval) ] each ;
+    [ (@eval) ] each ; inline
 
 : eval-identifier ( identifier -- )
     {
@@ -57,8 +57,8 @@ MACRO: preserving ( quot -- )
 : add-word-to-user-env ( name quot -- )
     joy get user-env>> set-at ;
 
-: incr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 + >>quotation-depth joy set ;
-: decr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 - >>quotation-depth joy set ;
+: incr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 + >>quotation-depth joy set ; inline
+: decr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 - >>quotation-depth joy set ; inline
 : get-quotation-depth ( -- n ) joy get quotation-depth>> ; inline
 
 ! generic eval word
@@ -290,7 +290,7 @@ M: ast-boolean (@eval) ( ast -- )
 : !=-joy ( -- ) [ = not ] binop ; inline
 : =-joy ( -- ) [ = ] binop ; inline    
 
-! binary operations
+! math operations
 
 : +-joy ( -- ) [ + ] binop ; inline
 : --joy ( -- ) [ - ] binop ; inline
@@ -308,7 +308,7 @@ M: ast-boolean (@eval) ( ast -- )
 : min-joy ( -- ) [ min ] binop ; inline
 
 ! predicate words
-: integer-joy ( -- ) [ number? ] unop ; inline
+: integer-joy ( -- ) [ integer? ] unop ; inline
 : char-joy ( -- ) [ [ string? ] [ length 1 = ] bi and ] unop ; inline
 : logical-joy ( -- ) [ boolean? ] unop ; inline
 ! : set-joy ( -- )  :TODO:
@@ -316,17 +316,50 @@ M: ast-boolean (@eval) ( ast -- )
 : list-joy ( -- ) [ quotation? ] unop ; inline
 : leaf-joy ( -- ) [ quotation? not ] unop ; inline
 ! : user
-! : float
+: float-joy ( -- ) [ float? ] unop ; inline
 ! : file
 
 ! file words
+: (fopen) ( mode pathname -- stream )
+    dup string? [ "Not a filename!" throw ] unless swap ! pathname mode
+    {
+        { [ "r" over start ] [ drop utf8 <file-reader> ] }
+        { [ "w" over start ] [ drop utf8 <file-writer> ] }
+        { [ "a" over start ] [ drop utf8 <file-appender> ] }
+        [ drop "You must specify a valid file mode!" throw ]
+    } cond ;
 : fopen-joy ( -- )
-    dstack-pop* drop dstack-pop* ! mode pathname --
-    dup [ string? ] [ exists? ] bi and
-    [ utf8 <file-writer>  ] [ "Files does not exist!" throw ] if
+    dstack-pop* dstack-pop* 
+    (fopen) dstack-push ; inline
+: fflush-joy ( -- )
+    dstack-pop* stream-flush ; inline
+: fgetch-joy ( -- )
+    dstack-pop* dup
+    stream-read1 1array >string swap
+    dstack-push dstack-push ; inline
+: fgets-joy ( -- )
+    dstack-pop* dup stream-readln swap
+    dstack-push dstack-push ; inline
+: fread-joy ( -- )
+    dstack-pop* dstack-pop* ! n stream --
+    dup [ stream-read ] dip swap ! data stream
+    dstack-push dstack-push ; inline
+: fwrite-joy ( -- )
+    dstack-pop* dstack-pop* ! bytes stream --
+    dup [ stream-write ] dip
     dstack-push ; inline
+: fremove-joy ( -- )
+    dstack-pop* [ delete-file true-joy ] [ 2drop false-joy ] recover ; inline
+: frename-joy ( -- )
+    dstack-pop* dstack-pop* swap
+    [ move-file true-joy ] [ 3drop false-joy ] recover ; inline
+: fputch-joy ( -- )
+    dstack-pop* dstack-pop*
+    dup [ stream-write1 ] dip
+    dstack-push ; inline
+: fputchars-joy ( -- ) fwrite-joy ; inline
 : fclose-joy ( -- )
-    dstack-pop* dispose ;
+    dstack-pop* dispose ; inline
 
 ! regenerate the environment
 : default-env ( -- env )
@@ -405,21 +438,29 @@ M: ast-boolean (@eval) ( ast -- )
 
         { ">=" [ >=-joy ] }
         { "<=" [ <=-joy ] }
-        { "<" [ <-joy ] }
-        { ">" [ >-joy ] }
-        { "=" [ =-joy ] }
+        { "<"  [ <-joy ] }
+        { ">"  [ >-joy ] }
+        { "="  [ =-joy ] }
         { "!=" [ !=-joy ] }
 
         { "integer" [ integer-joy ] }
-        { "char-joy" [ char-joy ] }
+        { "char"    [ char-joy ] }
         { "logical" [ logical-joy ] }
-        { "string" [ string-joy ] }
-        { "list" [ list-joy ] }
-        { "leaf" [ leaf-joy ] }
+        { "string"  [ string-joy ] }
+        { "list"    [ list-joy ] }
+        { "leaf"    [ leaf-joy ] }
+        { "float"   [ float-joy ] }
 
-        { "fopen" [ fopen-joy ] }
-        { "fclose" [ fclose-joy ] }
-        
+        { "fopen"   [ fopen-joy ] }
+        { "fclose"  [ fclose-joy ] }
+        { "fflush"  [ fflush-joy ] }
+        { "fgetch"  [ fgetch-joy ] }
+        { "fgets"   [ fgets-joy ] }
+        { "fread"   [ fread-joy ] }
+        { "fwrite"  [ fwrite-joy ] }
+        { "fremove" [ fremove-joy ] }
+        { "frename" [ frename-joy ] }
+        { "fputch"  [ fputch-joy ] }
         
     } ;
         
