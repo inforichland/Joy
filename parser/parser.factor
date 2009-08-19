@@ -10,6 +10,10 @@ ERROR: invalid-number str ;
 : check-number ( seq -- n )
     >string dup string>number [ ] [ invalid-number ] ?if ;
 
+: make-string ( seq -- str )
+    [ dup fixnum? [ 1string ] when ] map
+    "" [ append ] reduce ;
+
 EBNF: parse-joy
 
 Character = .
@@ -24,11 +28,12 @@ OptionalWhitespace = (WhitespaceCharacter | Comment)*
 Whitespace = (WhitespaceCharacter | Comment)+
 
 LetterOrDigit = DecimalDigit | Letter
-Identifier = (Letter | "_"):h (LetterOrDigit | "_")*:t => [[ { h t } flatten >string ]]
+Identifier = (Letter | "_"):h (LetterOrDigit | "_" | "-")*:t => [[ { h t } flatten make-string ]]
+IdentifierLiteral = Identifier:i => [[ i ast-identifier boa ]]
 
-OptionalMinus = ("-" => [[ CHAR: - ]])?
-IntegerLiteral = (OptionalMinus:m UnsignedIntegerLiteral:i) => [[ i m [ neg ] when ]]
-UnsignedIntegerLiteral = DecimalDigit+ => [[ check-number ast-number boa ]]
+OptionalMinus = ("-" => [[ t ]])?
+IntegerLiteral = (OptionalMinus:m UnsignedIntegerLiteral:i) => [[ i m [ neg ] when ast-number boa ]]
+UnsignedIntegerLiteral = DecimalDigit+:d => [[ d check-number ]]
 
 QuotationElement = AnyLiteral
 QuotationLiteral = "[" OptionalWhitespace
@@ -53,33 +58,32 @@ Boolean = "true" | "false"
 BooleanLiteral = Boolean:b => [[ b >string "true" = ast-boolean boa ]]
 
 Relational = ">=" | ">" | "<=" | "<" | "=" | "!="
-RelationalLiteral = Relational:r => [[ r >string ast-identifier boa ]]                                             
-                   
-IdentifierLiteral = Identifier:i => [[ i >string ast-identifier boa ]]
+RelationalLiteral = Relational:r => [[ r >string ast-identifier boa ]]
 
 BuiltinIdentifierLiteral = ("+" | "-" | "*" | "/"):i => [[ i >string ast-identifier boa ]]
 
 Definition = Identifier:i OptionalWhitespace "==" (Expression)+:j
-                                              => [[ i >string j >array ast-definition boa ]]
+                                              => [[ i j >array ast-definition boa ]]
 
-Defines = "DEFINE" Whitespace (Definition OptionalWhitespace ";" OptionalWhitespace)*:d
+DefineWord = "DEFINE" | "LIBRA"
+Defines = DefineWord Whitespace (Definition OptionalWhitespace ";" OptionalWhitespace)*:d
                               Definition:e OptionalWhitespace "."
                               => [[ d dup empty? [ drop e 1array ] [ e suffix ] if ast-definitions boa ]]
                                               
-AnyLiteral = RelationalLiteral |
+AnyLiteral = IdentifierLiteral |
+             IntegerLiteral |
+             RelationalLiteral |
              BooleanLiteral |
              BuiltinIdentifierLiteral |
              QuotationLiteral |
              SetLiteral |
-             IntegerLiteral |
              StringLiteral |
-             IdentifierLiteral |
              CharacterLiteral
                                               
 Expression = OptionalWhitespace
              AnyLiteral:e => [[ e ]]
 
-Code = ( (Defines | Expression):e OptionalWhitespace => [[ e ]])*:h OptionalWhitespace => [[ h ]]
+Code = OptionalWhitespace ( (Comment | Defines | Expression):e OptionalWhitespace => [[ e ]])*:h OptionalWhitespace => [[ h ]]
 
 ;EBNF
          

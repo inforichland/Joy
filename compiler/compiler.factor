@@ -116,9 +116,8 @@ MACRO: preserving ( quot -- )
 
 : (fold) ( list init quot -- ) reduce ; inline
 
-:: (linrec)
-    ( if-quot then-quot else1-quot else2-quot -- )
-    if-quot call
+:: (linrec) ( if-quot then-quot else1-quot else2-quot -- )
+    if-quot preserving
     [ then-quot call ]
     [ else1-quot call
       if-quot then-quot else1-quot else2-quot (linrec)
@@ -126,14 +125,14 @@ MACRO: preserving ( quot -- )
     ] if ; inline recursive
 
 :: (tailrec) ( if-quot then-quot else-quot -- )
-    if-quot call
+    if-quot preserving
     [ then-quot call ]
     [ else-quot call
       if-quot then-quot else-quot (tailrec)
     ] if ; inline recursive      
 
 :: (binrec) ( if-quot then-quot prod-quot comb-quot -- )
-    if-quot call
+    if-quot preserving
     [ then-quot call ]
     [ prod-quot call
       if-quot then-quot prod-quot comb-quot (binrec)
@@ -159,13 +158,15 @@ MACRO: preserving ( quot -- )
         { "pop"       [ \ drop , ] }
         { "popd"      [ [ drop ] , \ dip , ] }
         
-        { "put"   [ \ (put) , ] }
-        { "print" [ \ pprint , ] }
-        { "."     [ \ pprint , ] }
+        { "put"      [ \ (put) , ] }
+        { "putchars" [ \ print , ] }
+        { "print"    [ \ pprint , ] }
+        { "."        [ \ pprint , ] }
         
         { "or"  [ \ or , ] }
         { "and" [ \ and , ] }
         { "xor" [ \ xor , ] }
+        { "not" [ \ not , ] }
         
         { "+"     [ \ + , ] }
         { "*"     [ \ * , ] }
@@ -217,6 +218,7 @@ MACRO: preserving ( quot -- )
         { "take"     [ \ head , ] }
         { "concat"   [ \ append , ] }
         { "enconcat" [ \ (enconcat) , ] }
+        { "swoncat"  [ [ swap append ] % ] }
         { "null"     [ \ (null) , ] }
         { "small"    [ \ (small) , ] }
         { "has"      [ [ swap member? ] % ] }
@@ -292,6 +294,8 @@ SYMBOL: joy
 
 ! generic eval word
 
+M: string (compile) ( ast -- ) drop ; inline
+
 M: ast-definitions (compile) ( ast -- )
     definitions>> [ ast-definition? ] deep-filter [ (compile) ] each ; inline
 
@@ -320,6 +324,8 @@ M: ast-boolean (compile) ( ast -- ) value>> , ; inline
     H{ } clone >>user-env
     joy set ; inline
 
-: compile ( ast -- quot )
-    env
+: @compile ( ast -- quot )
     [ [ (compile) ] each ] [ ] make ;
+
+: compile ( ast -- quot )
+    env @compile ;
