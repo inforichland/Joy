@@ -3,10 +3,20 @@
 USING: kernel namespaces sequences accessors make joy.ast 
 combinators prettyprint math math.ranges random calendar 
 math.functions math.order strings io io.files destructors 
-arrays io.directories continuations io.encodings.utf8 ;
+arrays io.directories continuations io.encodings.utf8 
+macros stack-checker fry generalizations quotations math.parser 
+locals sequences.deep compiler.units words vocabs.parser
+assocs ;
 IN: joy.compiler
 
 GENERIC: (compile) ( ast -- )
+
+! printing
+: (put) ( o -- )
+    {
+        { [ dup string? ] [ print ] }
+        { [ dup number? ] [ number>string print ] }
+    } cond ; inline
 
 ! time
 : (time) ( -- time )
@@ -86,8 +96,55 @@ GENERIC: (compile) ( ast -- )
 
 : (fclose) ( stream -- ) dispose ; inline
 
-: eval-identifier ( ident -- )
-    {
+! ***********
+! combinators
+! ***********
+
+: (x) ( -- ) dup call ; inline
+
+! macro/ifte borrowed from Slava
+MACRO: preserving ( quot -- )
+    [ infer in>> length ] keep '[ _ ndup @ ] ;
+: (ifte) ( pred t f -- )
+    [ preserving ] 2dip if ; inline
+
+: (while) ( bquot quot -- )
+    swap [ keep ] curry [ swap ] compose
+    do compose [ loop ] curry when ; inline
+
+: (step) ( seq quot -- ) each ; inline
+
+: (fold) ( list init quot -- ) reduce ; inline
+
+:: (linrec)
+    ( if-quot then-quot else1-quot else2-quot -- )
+    if-quot call
+    [ then-quot call ]
+    [ else1-quot call
+      if-quot then-quot else1-quot else2-quot (linrec)
+      else2-quot call
+    ] if ; inline recursive
+
+:: (tailrec) ( if-quot then-quot else-quot -- )
+    if-quot call
+    [ then-quot call ]
+    [ else-quot call
+      if-quot then-quot else-quot (tailrec)
+    ] if ; inline recursive      
+
+:: (binrec) ( if-quot then-quot prod-quot comb-quot -- )
+    if-quot call
+    [ then-quot call ]
+    [ prod-quot call
+      if-quot then-quot prod-quot comb-quot (binrec)
+      [ if-quot then-quot prod-quot comb-quot (binrec) ] dip
+      if-quot then-quot prod-quot comb-quot (binrec)
+      comb-quot call
+    ] if ; inline recursive
+
+! compiling
+: default-env ( -- env )
+    H{
         { "dup"       [ \ dup , ] }
         { "dip"       [ \ dip , ] }
         { "swap"      [ \ swap , ] }
@@ -101,14 +158,15 @@ GENERIC: (compile) ( ast -- )
         { "rotated"   [ [ (rotate) ] , \ dip , ] }
         { "pop"       [ \ drop , ] }
         { "popd"      [ [ drop ] , \ dip , ] }
-
+        
+        { "put"   [ \ (put) , ] }
         { "print" [ \ pprint , ] }
-        { "." [ \ pprint , ] }
-
+        { "."     [ \ pprint , ] }
+        
         { "or"  [ \ or , ] }
         { "and" [ \ and , ] }
         { "xor" [ \ xor , ] }
-
+        
         { "+"     [ \ + , ] }
         { "*"     [ \ * , ] }
         { "/"     [ \ / , ] }
@@ -123,7 +181,7 @@ GENERIC: (compile) ( ast -- )
         { "succ"  [ [ 1 + ] % ] }
         { "max"   [ \ max , ] }
         { "min"   [ \ min , ] }
-
+        
         { "false" [ \ f , ] }
         { "true"  [ \ t , ] }
         { "rand"  [ 1 32767 [a,b] random , ] }
@@ -132,7 +190,7 @@ GENERIC: (compile) ( ast -- )
         { "sign"  [ \ (sign) , ] }
         { "neg"   [ \ (neg) , ] }
         { "abs"   [ \ abs , ] }
-
+        
         { "cos"   [ \ cos , ] }
         { "sin"   [ \ sin , ] }
         { "tan"   [ \ tan , ] }
@@ -146,7 +204,7 @@ GENERIC: (compile) ( ast -- )
         { "log10" [ \ (log10) , ] }
         { "pow"   [ \ ^ , ] }
         { "sqrt"  [ \ sqrt , ] }
-
+        
         { "cons"     [ [ swap prefix ] % ] }
         { "swons"    [ \ prefix , ] }
         { "first"    [ \ first , ] }
@@ -163,14 +221,14 @@ GENERIC: (compile) ( ast -- )
         { "small"    [ \ (small) , ] }
         { "has"      [ [ swap member? ] % ] }
         { "in"       [ \ member? , ] }
-
+        
         { ">=" [ \ >= , ] }
         { ">"  [ \ > , ] }
         { "<=" [ \ <= , ] }
         { "<"  [ \ < , ] }
         { "!=" [ [ = not ] % ] }
         { "="  [ \ = , ] }
-
+        
         { "integer" [ \ integer? , ] }
         { "char"    [ [ [ string? ] [ length 1 = ] bi and ] % ] }
         { "logical" [ \ boolean? , ] }
@@ -178,7 +236,7 @@ GENERIC: (compile) ( ast -- )
         { "list"    [ \ sequence? , ] }
         { "leaf"    [ [ sequence? not ] % ] }
         { "float"   [ \ float? , ] }
-
+        
         { "fopen"     [ \ (fopen) , ] }
         { "fflush"    [ \ stream-flush , ] }
         { "fgetch"    [ \ (fgetch) , ] }
@@ -191,29 +249,77 @@ GENERIC: (compile) ( ast -- )
         { "fputchars" [ \ (fputchars) , ] }
         { "fclose"    [ \ (fclose) , ] }
         
-        [ ": Unknown word!" append throw ]
-    } case ; inline
+        { "i"       [ \ call , ] }
+        { "x"       [ [ dup call ] % ] }
+        { "ifte"    [ \ (ifte) , ] }
+        { "while"   [ \ (while) , ] }
+        { "step"    [ \ (step) , ] }
+        { "map"     [ \ map , ] }
+        { "fold"    [ \ reduce , ] }
+        { "times"   [ \ times , ] }
+        { "linrec"  [ \ (linrec) , ] }
+        { "tailrec" [ \ (tailrec) , ] }
+        { "binrec"  [ \ (binrec) , ] }
+    } ;
+
+TUPLE: joy-env user-env env ;
+
+SYMBOL: joy
+
+: compile-identifier ( ident -- )
+    dup joy get env>> at
+    [ call drop ]
+    [ joy get user-env>> at
+      [ call , ]
+      [ ": Unknown word!" append throw ] if*
+    ] if* ; inline
+
+: add-to-user-env ( word name -- )
+    [ literalize 1quotation ] dip
+    joy get user-env>> set-at ; inline
+
+: add-word ( ast -- word )
+    name>> current-vocab name>> create ; inline
+
+: compile-definition ( word ast -- )
+    body>> [ [ (compile) ] each ] [ ] make
+    dup [ infer ] [ 2drop (( -- )) ] recover
+    [ define-inline ] 3curry with-compilation-unit ; inline
+
+: create-definition ( ast -- word )
+    [ add-word ] [ name>> ] bi dupd ! word word name
+    add-to-user-env ; inline
 
 ! generic eval word
 
 M: ast-definitions (compile) ( ast -- )
-    definitions>> [ ast-definition? ] filter [ (compile) ] each ; inline
+    definitions>> [ ast-definition? ] deep-filter [ (compile) ] each ; inline
 
-M: ast-definition (compile) ( ast -- ) drop ; inline ! [ body>> ] [ name>> ] bi ; inline
-
+M: ast-definition (compile) ( ast -- )
+    dup create-definition swap
+    compile-definition ; inline
+    
 M: ast-string (compile) ( ast -- ) string>> , ; inline
 
 M: ast-number (compile) ( ast -- ) num>> , ; inline
 
 M: ast-character (compile) ( ast -- ) char>> , ; inline
 
-M: ast-identifier (compile) ( ast -- ) name>>  eval-identifier ; inline
+M: ast-identifier (compile) ( ast -- )
+    name>> compile-identifier ; inline
 
-M: ast-quotation (compile) ( ast -- ) body>> , ; inline
+M: ast-quotation (compile) ( ast -- )
+    body>> [ [ (compile) ] each ] [ ] make , ; inline
 
 M: ast-special (compile) ( ast -- ) value>> , ; inline
 
 M: ast-boolean (compile) ( ast -- ) value>> , ; inline
 
+: env ( -- )
+    joy-env new default-env >>env
+    H{ } clone >>user-env
+    joy set ; inline
+
 : compile ( ast -- quot )
+    env
     [ [ (compile) ] each ] [ ] make ;

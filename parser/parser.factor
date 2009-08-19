@@ -62,9 +62,9 @@ BuiltinIdentifierLiteral = ("+" | "-" | "*" | "/"):i => [[ i >string ast-identif
 Definition = Identifier:i OptionalWhitespace "==" (Expression)+:j
                                               => [[ i >string j >array ast-definition boa ]]
 
-Defines = "DEFINE" Whitespace (Definition OptionalWhitespace ";")*:d OptionalWhitespace
+Defines = "DEFINE" Whitespace (Definition OptionalWhitespace ";" OptionalWhitespace)*:d
                               Definition:e OptionalWhitespace "."
-                              => [[ d dup empty? [ drop e 1array ] [ first e suffix ] if ast-definitions boa ]]
+                              => [[ d dup empty? [ drop e 1array ] [ e suffix ] if ast-definitions boa ]]
                                               
 AnyLiteral = RelationalLiteral |
              BooleanLiteral |
