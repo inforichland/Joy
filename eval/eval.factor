@@ -6,41 +6,51 @@ combinators math assocs math.ranges random
 quotations prettyprint math.functions 
 calendar math.order macros generalizations fry 
 parser words stack-checker strings io.encodings.utf8 
-io io.files destructors arrays io.directories continuations ;
+io io.files destructors arrays io.directories
+continuations lists locals math.parser sequences.deep
+joy.compiler make effects ;
 
 IN: joy.eval
 
-TUPLE: joy-env env user-env { dstack vector } { rstack vector } { quotation-depth fixnum } ;
+TUPLE: joy-cons { car read-only } { cdr read-only } compiled-quot ;
+
+TUPLE: joy-env env user-env dstack rstack { quotation-depth fixnum } ;
+
+: joy-cons ( car cdr -- cons ) f \ joy-cons boa ; inline
+
+INSTANCE: joy-cons list
+
+M: joy-cons car ( jc -- car ) car>> ;
+M: joy-cons cdr ( jc -- car ) cdr>> ;
 
 SYMBOL: joy
 
 GENERIC: (@eval) ( ast -- )
 
-! 
-! utilities
-! 
-
-! macro borrowed from Slava
-
-MACRO: preserving ( quot -- )
-    [ infer in>> length ] keep '[ _ ndup @ ] ;
-
-: ifte ( pred t f -- )
-    [ preserving ] 2dip if ; inline
-
 ! words for dealing with the joy environment
 
 : dstack-empty? ( -- ? )
-    joy get dstack>> empty? ;
+    joy get dstack>> car +nil+ = ; inline
 
 : dstack-push ( value -- )
-    joy get dstack>> push ;
+    joy get dstack>> cons
+    joy get (>>dstack) ; inline
 
 : dstack-pop* ( -- value )
-    joy get dstack>> pop ;
-
+    joy get dstack>> [ car ] [ cdr ] bi
+    joy get (>>dstack) ; inline
+    
 : dstack-pop ( -- )
     dstack-pop* drop ; inline
+
+
+! utilities
+
+: joy-call ( jc -- )
+    dup compiled-quot>> 
+    [ [ [ , ] leach ] { } make @compile ] unless
+    dup infer effect-height
+    [ call ] dip [ dstack-push ] times ; inline
 
 ! evaluation
 
@@ -54,7 +64,7 @@ MACRO: preserving ( quot -- )
         [ 2drop "Invalid word!" throw ]
     } cond ; inline
 
-: add-word-to-user-env ( name quot -- )
+: add-word-to-user-env ( quot name -- )
     joy get user-env>> set-at ;
 
 : incr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 + >>quotation-depth joy set ; inline
@@ -66,7 +76,7 @@ MACRO: preserving ( quot -- )
 M: object (@eval) ( obj -- ) dstack-push ; inline
 
 M: ast-definitions (@eval) ( ast -- )
-    definitions>> [ ast-definition? ] filter [ (@eval) ] each ; inline
+    definitions>> [ ast-definition? ] deep-filter [ (@eval) ] each ; inline
 
 M: ast-definition (@eval) ( ast -- )
     [ body>> ] [ name>> ] bi add-word-to-user-env ; inline
@@ -81,13 +91,12 @@ M: ast-character (@eval) ( ast -- )
     char>> dstack-push ; inline
 
 M: ast-identifier (@eval) ( ast -- )
-    get-quotation-depth 0 =
-    [ name>> eval-identifier ] when ; inline
+    name>> eval-identifier ; inline
 
 M: ast-quotation (@eval) ( ast -- )
-    incr-quotation-depth
-    body>> >quotation dstack-push
-    decr-quotation-depth ; inline
+    body>> [ +nil+ ] dip
+    [ swap joy-cons ] each
+    dstack-push ; inline
 
 M: ast-special (@eval) ( ast -- )
     value>> eval-identifier ; inline
@@ -114,15 +123,6 @@ M: ast-boolean (@eval) ( ast -- )
 ! words you can use
 ! *************************************
 
-! combinators
-: (i-joy) ( quot -- )
-    [ (@eval) ] each ; inline 
-
-: i-joy ( -- )
-    dstack-pop* dup
-    quotation?
-    [ (i-joy) ] [ drop "Not a quotation!" throw ] if ; inline
-
 ! stack shuffling words
 
 : dup-joy ( -- )
@@ -137,12 +137,12 @@ M: ast-boolean (@eval) ( ast -- )
 
 : (dip-joy) ( quot -- )
     dstack-pop* ! pop TOS
-    [ [ (@eval) ] each ] dip
+    [ joy-call ] dip
     dstack-push ; inline ! push back on to TOS
 
 : dip-joy ( -- )
     dstack-pop* dup
-    quotation?
+    joy-cons?
     [ (dip-joy) ] [ drop "Not a quotation!" throw ] if ; inline
 
 : rollup-joy ( -- ) ! X Y Z -- Z X Y (1 2 3 -- 3 1 2)
@@ -361,15 +361,104 @@ M: ast-boolean (@eval) ( ast -- )
 : fclose-joy ( -- )
     dstack-pop* dispose ; inline
 
+! combinators
+: (i-joy) ( quot -- )
+    [ (@eval) ] each ; inline 
+
+: i-joy ( -- )
+    dstack-pop* dup
+    quotation?
+    [ (i-joy) ] [ drop "Not a quotation!" throw ] if ; inline
+
+: x-joy ( -- ) dup-joy i-joy ; inline
+
+MACRO: preserving ( quot -- )
+    [ infer in>> length ] keep '[ _ ndup @ ] ;
+
+: ifte-joy ( -- )
+    dstack-pop* dstack-pop* dstack-pop* spin ! pred t f
+    [ preserving ] 2dip if ; inline
+
+: while-joy ( -- )
+    dstack-pop* dstack-pop*
+    [ keep ] curry [ swap ] compose
+    do compose [ loop ] curry when ; inline
+
+: step-joy ( -- )
+    dstack-pop* dstack-pop* swap each ; inline
+
+: fold-joy ( -- )
+    dstack-pop* dstack-pop* dstack-pop* spin
+    reduce ; inline
+
+: map-joy ( -- )
+    dstack-pop* dstack-pop* swap map
+    dstack-push ; inline
+
+: times-joy ( -- )
+    dstack-pop* dstack-pop* swap each ; inline
+
+:: (linrec) ( if-quot then-quot else1-quot else2-quot -- )
+    if-quot preserving
+    [ then-quot call ]
+    [ else1-quot call
+      if-quot then-quot else1-quot else2-quot (linrec)
+      else2-quot call
+    ] if ; inline recursive
+
+: linrec-joy ( -- )
+    dstack-pop* dstack-pop* dstack-pop* dstack-pop*
+    4 -nrot spin
+    (linrec) ; inline    
+    
+:: (tailrec) ( if-quot then-quot else-quot -- )
+    if-quot preserving
+    [ then-quot call ]
+    [ else-quot call
+      if-quot then-quot else-quot (tailrec)
+    ] if ; inline recursive
+
+: tailrec-joy ( -- )
+    dstack-pop* dstack-pop* dstack-pop*
+    spin (tailrec) ; inline
+
+:: (binrec) ( if-quot then-quot prod-quot comb-quot -- )
+    if-quot preserving
+    [ then-quot call ]
+    [ prod-quot call
+      if-quot then-quot prod-quot comb-quot (binrec)
+      [ if-quot then-quot prod-quot comb-quot (binrec) ] dip
+      if-quot then-quot prod-quot comb-quot (binrec)
+      comb-quot call
+    ] if ; inline recursive
+
+: binrec-joy ( -- )
+    dstack-pop* dstack-pop* dstack-pop* dstack-pop*
+    4 -nrot spin
+    (binrec) ; inline
+
+! printing words
+: put-joy ( -- )
+    dstack-pop*
+    {
+        { [ dup string? ] [ print ] }
+        { [ dup number? ] [ number>string print ] }
+    } cond ; inline
+
+: putchars-joy ( -- )
+    dstack-pop* write ; inline 
+
 ! regenerate the environment
 : default-env ( -- env )
     H{
-        { "+"    [ +-joy ] }
-        { "-"    [ --joy ] }
-        { "*"    [ *-joy ] }
-        { "/"    [ /-joy ] }
-        { "rand" [ rand-joy ] }
-        { "time" [ time-joy ] }
+        { "+"     [ +-joy ] }
+        { "-"     [ --joy ] }
+        { "*"     [ *-joy ] }
+        { "/"     [ /-joy ] }
+        { "rand"  [ rand-joy ] }
+        { "time"  [ time-joy ] }
+        { "true"  [ true-joy ] }
+        { "false" [ false-joy ] }
         
         { "dup"       [ dup-joy ] }
         { "swap"      [ swap-joy ] }
@@ -426,7 +515,6 @@ M: ast-boolean (@eval) ( ast -- )
         { "at"       [ at-joy ] }
         { "size"     [ size-joy ] }
         { "uncons"   [ uncons-joy ] }
-        { "i"        [ i-joy ] }
         { "drop"     [ drop-joy ] }
         { "take"     [ take-joy ] }
         { "concat"   [ concat-joy ] }
@@ -461,13 +549,32 @@ M: ast-boolean (@eval) ( ast -- )
         { "fremove" [ fremove-joy ] }
         { "frename" [ frename-joy ] }
         { "fputch"  [ fputch-joy ] }
+
+        { "i"       [ i-joy ] }
+        { "x"       [ x-joy ] }
+        { "ifte"    [ ifte-joy ] }
+        { "while"   [ while-joy ] }
+        { "step"    [ step-joy ] }
+        { "map"     [ map-joy ] }
+        { "fold"    [ fold-joy ] }
+        { "times"   [ times-joy ] }
+        { "linrec"  [ linrec-joy ] }
+        { "tailrec" [ tailrec-joy ] }
+        { "binrec"  [ binrec-joy ] }
+      !  { "case"    [ case-joy ] }
+
+        { "put"      [ put-joy ] }
+        { "putchars" [ putchars-joy ] }
+        { "print"    [ print-joy ] }
+      !  { "."        [ print-joy ] }
+      !  { "putch"    [ putch-joy ] }
         
     } ;
         
 : env ( -- )
     joy-env new default-env >>env
-    V{ } clone >>dstack
-    V{ } clone >>rstack
+    +nil+ >>dstack
+    +nil+ >>rstack
     H{ } clone >>user-env
     0 >>quotation-depth
     joy set ;
@@ -484,7 +591,7 @@ M: ast-boolean (@eval) ( ast -- )
     ! now clean up the stack, in case any
     ! raw ast- tuples are left on it
     ! (from being removed from a quotation)
-    joy get dstack>> 0 joy get rstack>> copy ! copy dstack to rstack
-    joy get V{ } clone >>dstack ! clear the dstack
-    rstack>> [ (@eval) ] each ! re-evaluate the stack
-    joy get V{ } clone >>rstack drop ; ! clear the rstack
+    joy get dstack>> clone joy get swap >>rstack ! copy dstack to rstack
+    +nil+ >>dstack ! clear the dstack
+    rstack>> [ (@eval) ] leach ! re-evaluate the stack
+    joy get +nil+ >>rstack joy set ; ! clear the rstack

@@ -100,8 +100,6 @@ GENERIC: (compile) ( ast -- )
 ! combinators
 ! ***********
 
-: (x) ( -- ) dup call ; inline
-
 ! macro/ifte borrowed from Slava
 MACRO: preserving ( quot -- )
     [ infer in>> length ] keep '[ _ ndup @ ] ;
@@ -150,18 +148,19 @@ MACRO: preserving ( quot -- )
         { "rollup"    [ \ -rot , ] }
         { "rolldown"  [ \ rot , ] }
         { "rotate"    [ \ (rotate) , ] }
+        { "pop"       [ \ drop , ] }
         { "dupd"      [ \ dupd , ] }
         { "swapd"     [ \ swapd , ] }
         { "rollupd"   [ [ -rot ] , \ dip , ] }
         { "rolldownd" [ [ rot ] , \ dip , ] }
         { "rotated"   [ [ (rotate) ] , \ dip , ] }
-        { "pop"       [ \ drop , ] }
         { "popd"      [ [ drop ] , \ dip , ] }
         
         { "put"      [ \ (put) , ] }
         { "putchars" [ \ print , ] }
         { "print"    [ \ pprint , ] }
         { "."        [ \ pprint , ] }
+        { "putch"    [ \ write , ] }
         
         { "or"  [ \ or , ] }
         { "and" [ \ and , ] }
@@ -262,6 +261,7 @@ MACRO: preserving ( quot -- )
         { "linrec"  [ \ (linrec) , ] }
         { "tailrec" [ \ (tailrec) , ] }
         { "binrec"  [ \ (binrec) , ] }
+        { "case"    [ \ case , ] }
     } ;
 
 TUPLE: joy-env user-env env ;
@@ -311,6 +311,9 @@ M: ast-character (compile) ( ast -- ) char>> , ; inline
 
 M: ast-identifier (compile) ( ast -- )
     name>> compile-identifier ; inline
+
+M: ast-set (compile) ( ast -- )
+    set>> , ; inline
 
 M: ast-quotation (compile) ( ast -- )
     body>> [ [ (compile) ] each ] [ ] make , ; inline

@@ -2,7 +2,7 @@
 ! See http://factorcode.org/license.txt for BSD license.
 USING: kernel peg peg.ebnf strings arrays unicode.categories
 sequences sequences.deep math math.parser parser-combinators
-lists math.parser accessors joy.ast sets ;
+lists math.parser accessors joy.ast sets strings.parser ;
 IN: joy.parser
 
 ERROR: invalid-number str ;
@@ -51,7 +51,7 @@ SetLiteral = "{" OptionalWhitespace
                     
 CharacterLiteral = "'" Character:c => [[ c 1string ast-character boa ]]
 
-StringLiteral = '"' (StringLiteralCharacter | '\"' => [[ CHAR: " ]])*:s '"' => [[ s >string ast-string boa ]]
+StringLiteral = '"' (StringLiteralCharacter | '\"' => [[ CHAR: " ]])*:s '"' => [[ s >string unescape-string ast-string boa ]]
 StringLiteralCharacter = [^"]
 
 Boolean = "true" | "false"
@@ -68,7 +68,7 @@ Definition = Identifier:i OptionalWhitespace "==" (Expression)+:j
 DefineWord = "DEFINE" | "LIBRA"
 Defines = DefineWord Whitespace (Definition OptionalWhitespace ";" OptionalWhitespace)*:d
                               Definition:e OptionalWhitespace "."
-                              => [[ d dup empty? [ drop e 1array ] [ e suffix ] if ast-definitions boa ]]
+                        => [[ d dup empty? [ drop e 1array ] [ e suffix ] if [ ast-definition? ] deep-filter ast-definitions boa ]]
                                               
 AnyLiteral = IdentifierLiteral |
              IntegerLiteral |
