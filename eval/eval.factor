@@ -8,15 +8,17 @@ calendar math.order macros generalizations fry
 parser words stack-checker strings io.encodings.utf8 
 io io.files destructors arrays io.directories
 continuations lists locals math.parser sequences.deep
-joy.compiler joy.cons make effects ;
+joy.cons make effects ;
 
 IN: joy.eval
 
-TUPLE: joy-env env user-env dstack rstack { quotation-depth fixnum } ;
+TUPLE: joy-env env user-env dstack rstack ;
 
 SYMBOL: joy
 
 GENERIC: (@eval) ( ast -- )
+
+GENERIC: (@compile) ( ast -- )
 
 ! ********************************************
 ! words for dealing with the joy environment
@@ -35,14 +37,59 @@ GENERIC: (@eval) ( ast -- )
     dstack-pop* drop ; inline
 
 ! ******************************
+! compiling quotations
+! ******************************
+
+: compile-identifier ( ident -- )
+    dup joy get env>> at
+    [ % drop ]
+    [
+        dup joy get user-env>> at
+        [ % drop ]
+        [ ": Unknown word!" append throw ]
+        if*
+    ]
+    if* ; inline
+
+: @compile ( ast -- quot )
+    [ [ (@compile) ] leach ] [ ] make ; inline
+
+: do-push ( obj -- ) [ dstack-push ] curry % ; inline
+
+M: object (@compile) ( obj -- ) do-push ; inline
+
+M: ast-string (@compile) ( ast -- ) string>> do-push ; inline
+
+M: ast-number (@compile) ( ast -- ) num>> do-push ; inline
+
+M: ast-character (@compile) ( ast -- ) char>> do-push ; inline
+
+M: ast-identifier (@compile) ( ast -- )
+    name>> compile-identifier ; inline
+
+M: ast-set (@compile) ( ast -- ) set>> do-push ; inline
+
+M: joy-cons (@compile) ( ast -- )
+    [ [ (@compile) ] leach ] [ ] make do-push ; inline
+
+M: ast-boolean (@compile) ( ast -- ) value>> do-push ; inline
+
+! ******************************
 ! utilities
 ! ******************************
 
 : joy-call ( jc -- )
     dup compiled-quot>> 
-    [ [ [ , ] leach ] { } make @compile ] unless
-    dup infer effect-height
-    [ call ] dip [ dstack-push ] times ; inline
+    [ dup @compile >>compiled-quot ] unless
+    compiled-quot>> call ; inline
+
+: joy-keep ( x quot -- x )
+    over '[ _ joy-call ] call dip ; inline
+
+: joy-each ( quot -- )
+    joy get dstack>> clone joy get swap >>rstack
+    +nil+ >>dstack dup rstack>>
+    
 
 ! ******************************
 ! evaluation
@@ -53,7 +100,7 @@ GENERIC: (@eval) ( ast -- )
 
 : eval-identifier ( identifier -- )
     {
-        { [ dup joy get env>> at ]      [ joy get env>> at call ] }
+        { [ dup joy get env>>      at ] [ joy get env>> at call ] }
         { [ dup joy get user-env>> at ] [ joy get user-env>> at user-eval ] }
         [ 2drop "Invalid word!" throw ]
     } cond ; inline
@@ -61,12 +108,8 @@ GENERIC: (@eval) ( ast -- )
 : add-word-to-user-env ( quot name -- )
     joy get user-env>> set-at ;
 
-: incr-quotation-depth ( -- ) joy get [ 1 + ] change-quotation-depth drop ; inline
-: decr-quotation-depth ( -- ) joy get [ 1 - ] change-quotation-depth drop ; inline
-: get-quotation-depth ( -- n ) joy get quotation-depth>> ; inline
-
 : make-quot ( seq -- cons )
-    [ +nil+ ] dip 
+    [ +nil+ ] dip reverse
     [ dup ast-quotation? [ body>> make-quot ] when swap joy-cons ] each ; inline recursive
 
 ! ******************************
@@ -137,8 +180,7 @@ M: ast-boolean (@eval) ( ast -- )
     dstack-push ; inline ! push back on to TOS
 
 : dip-joy ( -- )
-    dstack-pop* dup
-    joy-cons?
+    dstack-pop* dup joy-cons?
     [ (dip-joy) ] [ drop "Not a quotation!" throw ] if ; inline
 
 : rollup-joy ( -- ) ! X Y Z -- Z X Y (1 2 3 -- 3 1 2)
@@ -383,48 +425,45 @@ M: ast-boolean (@eval) ( ast -- )
 ! **********************************
 
 : i-joy ( -- )
-    dstack-pop* dup
-    [ joy-call ] [ drop "Not a quotation!" throw ] if ; inline
+    dstack-pop* '[ _ joy-call ] call ; inline
 
 : x-joy ( -- ) dup-joy i-joy ; inline
 
 MACRO: preserving ( quot -- )
-    [ infer in>> length ] keep '[ _ ndup @ ] ;
+    [ infer in>> length ] joy-keep '[ _ ndup @ ] ;
 
 : ifte-joy ( -- )
-    dstack-pop* dstack-pop* dstack-pop* spin ! pred t f
+    dstack-pop* '[ _ joy-call ] dstack-pop* '[ _ joy-call ] dstack-pop* spin ! pred t f
     [ preserving ] 2dip if ; inline
 
 : while-joy ( -- )
     dstack-pop* dstack-pop*
-    [ keep ] curry [ swap ] compose
+    [ joy-keep ] curry [ swap ] compose
     do compose [ loop ] curry when ; inline
 
 : step-joy ( -- )
-    dstack-pop* dstack-pop* swap leach ; inline
+    dstack-pop* '[ _ joy-call ] dstack-pop* swap leach ; inline
 
 : fold-joy ( -- )
     dstack-pop* dstack-pop* dstack-pop* spin
     reduce ; inline
 
 : ((map-joy)) ( list quot -- cdr quot )
-    [ [ car ] dip joy-call ] [ [ cdr ] dip ] 2bi ; inline
+    [ [ car ] dip call ] [ [ cdr ] dip ] 2bi ; inline
 
-: (map-joy) ( list quot -- result )
-    over nil? [ drop ] [ ((map-joy)) (map-joy) cons ] if ; inline recursive
+: (map-joy) ( list quot -- )
+    over nil? [ drop ] [ ((map-joy)) (map-joy) joy-cons ] if ; inline recursive
 
 : map-joy ( -- )
-    dstack-pop* dstack-pop* swap
-    (map-joy)
-    dstack-push ; inline
+    dstack-pop* '[ _ joy-call ] dstack-pop* swap (map-joy) ; inline
 
 : times-joy ( -- )
     dstack-pop* dstack-pop* swap leach ; inline
 
 :: (linrec) ( if-quot then-quot else1-quot else2-quot -- )
     if-quot preserving
-    [ then-quot call ]
-    [ else1-quot call
+    [ then-quot '[ _ joy-call ] call ]
+    [ else1-quot '[ _ joy-call ] call
       if-quot then-quot else1-quot else2-quot (linrec)
       else2-quot call
     ] if ; inline recursive
@@ -436,8 +475,8 @@ MACRO: preserving ( quot -- )
     
 :: (tailrec) ( if-quot then-quot else-quot -- )
     if-quot preserving
-    [ then-quot call ]
-    [ else-quot call
+    [ then-quot '[ _ joy-call ] call ]
+    [ else-quot '[ _ joy-call ] call
       if-quot then-quot else-quot (tailrec)
     ] if ; inline recursive
 
@@ -447,8 +486,8 @@ MACRO: preserving ( quot -- )
 
 :: (binrec) ( if-quot then-quot prod-quot comb-quot -- )
     if-quot preserving
-    [ then-quot call ]
-    [ prod-quot call
+    [ then-quot '[ _ joy-call ] call ]
+    [ prod-quot '[ _ joy-call ] call
       if-quot then-quot prod-quot comb-quot (binrec)
       [ if-quot then-quot prod-quot comb-quot (binrec) ] dip
       if-quot then-quot prod-quot comb-quot (binrec)
@@ -606,7 +645,6 @@ MACRO: preserving ( quot -- )
     +nil+ >>dstack
     +nil+ >>rstack
     H{ } clone >>user-env
-    0 >>quotation-depth
     joy set ;
 
 : (eval) ( string -- )
