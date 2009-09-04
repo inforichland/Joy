@@ -8,43 +8,35 @@ calendar math.order macros generalizations fry
 parser words stack-checker strings io.encodings.utf8 
 io io.files destructors arrays io.directories
 continuations lists locals math.parser sequences.deep
-joy.compiler make effects ;
+joy.compiler joy.cons make effects ;
 
 IN: joy.eval
 
-TUPLE: joy-cons { car read-only } { cdr read-only } compiled-quot ;
-
 TUPLE: joy-env env user-env dstack rstack { quotation-depth fixnum } ;
-
-: joy-cons ( car cdr -- cons ) f \ joy-cons boa ; inline
-
-INSTANCE: joy-cons list
-
-M: joy-cons car ( jc -- car ) car>> ;
-M: joy-cons cdr ( jc -- car ) cdr>> ;
 
 SYMBOL: joy
 
 GENERIC: (@eval) ( ast -- )
 
+! ********************************************
 ! words for dealing with the joy environment
+! ********************************************
 
 : dstack-empty? ( -- ? )
     joy get dstack>> car +nil+ = ; inline
 
 : dstack-push ( value -- )
-    joy get dstack>> cons
-    joy get (>>dstack) ; inline
+    joy get [ cons ] change-dstack drop ; inline
 
 : dstack-pop* ( -- value )
-    joy get dstack>> [ car ] [ cdr ] bi
-    joy get (>>dstack) ; inline
+    joy get [ [ car ] [ cdr ] bi ] change-dstack drop ; inline
     
 : dstack-pop ( -- )
     dstack-pop* drop ; inline
 
-
+! ******************************
 ! utilities
+! ******************************
 
 : joy-call ( jc -- )
     dup compiled-quot>> 
@@ -52,7 +44,9 @@ GENERIC: (@eval) ( ast -- )
     dup infer effect-height
     [ call ] dip [ dstack-push ] times ; inline
 
+! ******************************
 ! evaluation
+! ******************************
 
 : user-eval ( user-word -- )
     [ (@eval) ] each ; inline
@@ -67,11 +61,17 @@ GENERIC: (@eval) ( ast -- )
 : add-word-to-user-env ( quot name -- )
     joy get user-env>> set-at ;
 
-: incr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 + >>quotation-depth joy set ; inline
-: decr-quotation-depth ( -- ) joy get dup quotation-depth>> 1 - >>quotation-depth joy set ; inline
+: incr-quotation-depth ( -- ) joy get [ 1 + ] change-quotation-depth drop ; inline
+: decr-quotation-depth ( -- ) joy get [ 1 - ] change-quotation-depth drop ; inline
 : get-quotation-depth ( -- n ) joy get quotation-depth>> ; inline
 
+: make-quot ( seq -- cons )
+    [ +nil+ ] dip 
+    [ dup ast-quotation? [ body>> make-quot ] when swap joy-cons ] each ; inline recursive
+
+! ******************************
 ! generic eval word
+! ******************************
 
 M: object (@eval) ( obj -- ) dstack-push ; inline
 
@@ -94,9 +94,7 @@ M: ast-identifier (@eval) ( ast -- )
     name>> eval-identifier ; inline
 
 M: ast-quotation (@eval) ( ast -- )
-    body>> [ +nil+ ] dip
-    [ swap joy-cons ] each
-    dstack-push ; inline
+    body>> make-quot dstack-push ; inline
 
 M: ast-special (@eval) ( ast -- )
     value>> eval-identifier ; inline
@@ -104,9 +102,9 @@ M: ast-special (@eval) ( ast -- )
 M: ast-boolean (@eval) ( ast -- )
     value>> dstack-push ; inline
 
-!
+! *************************************
 ! helper functions
-!
+! *************************************
 
 : unop ( quot -- )
     dstack-pop*
@@ -120,10 +118,8 @@ M: ast-boolean (@eval) ( ast -- )
     dstack-push ; inline
 
 ! *************************************
-! words you can use
-! *************************************
-
 ! stack shuffling words
+! *************************************
 
 : dup-joy ( -- )
     dstack-pop* dup
@@ -174,9 +170,11 @@ M: ast-boolean (@eval) ( ast -- )
 
 : popd-joy ( -- ) dstack-pop* pop-joy dstack-push ; inline
 
-: print-joy ( -- ) dstack-pop* pprint ; inline
+: print-joy ( -- ) dstack-pop* pprint " " write ; inline
 
+! ***************************
 ! logic words
+! ***************************
 
 : or-joy ( -- )
     dstack-pop* dstack-pop* 
@@ -202,7 +200,9 @@ M: ast-boolean (@eval) ( ast -- )
         [ 2drop "Invalid operands for 'xor'!" throw ]
     } cond ; inline 
 
+! *****************************
 ! miscellaneous words
+! *****************************
 
 : false-joy ( -- ) f dstack-push ; inline
 : true-joy  ( -- ) t dstack-push ; inline
@@ -216,7 +216,9 @@ M: ast-boolean (@eval) ( ast -- )
     1970 1 1 0 0 0 0 hours <timestamp>
     time- duration>seconds floor dstack-push ; inline
 
+! ****************************
 ! unary operations
+! ****************************
 
 : (sign) ( n -- n' )
     {
@@ -229,7 +231,9 @@ M: ast-boolean (@eval) ( ast -- )
 : neg-joy ( -- ) [ 0 swap - ] unop ; inline
 : abs-joy ( -- ) [ abs ] unop ; inline
 
+! **************************
 ! trigish functions
+! **************************
 
 : cos-joy ( -- ) [ cos ] unop ; inline
 : sin-joy ( -- ) [ sin ] unop ; inline
@@ -245,16 +249,18 @@ M: ast-boolean (@eval) ( ast -- )
 : pow-joy ( -- ) [ ^ ] binop ; inline
 : sqrt-joy ( -- ) [ sqrt ] unop ; inline
 
+! *******************************
 ! list (quotation) operations
-: cons-joy ( -- ) [ swap prefix ] binop ; inline
-: swons-joy ( -- ) [ prefix ] binop ; inline
-: first-joy ( -- ) [ first ] unop ; inline
-: rest-joy ( -- ) [ rest ] unop ; inline
-: of-joy ( -- ) [ nth ] binop ; inline
-: at-joy ( -- ) [ swap nth ] binop ; inline
-: size-joy ( -- ) [ length ] unop ; inline
-: uncons-joy ( -- ) [ dup rest [ first ] dip ] unop dstack-push ; inline
-: drop-joy ( -- ) [ tail ] binop ; inline
+! ******************************
+: cons-joy ( -- ) [ joy-cons ] binop ; inline
+: swons-joy ( -- ) [ swap joy-cons ] binop ; inline
+: first-joy ( -- ) [ car ] unop ; inline
+: rest-joy ( -- ) [ cdr ] unop ; inline
+: of-joy ( -- ) [ swap [ cdr ] times car ] binop ; inline
+: at-joy ( -- ) [ [ cdr ] times car ] binop ; inline
+: size-joy ( -- ) [ llength ] unop ; inline
+: uncons-joy ( -- ) [ [ car ] [ cdr ] bi ] unop dstack-push ; inline
+: drop-joy ( -- ) [ [ cdr ] times ] binop ; inline
 : take-joy ( -- ) [ head ] binop ; inline
 : concat-joy ( -- ) [ append ] binop ; inline
 : enconcat-joy ( -- )
@@ -264,25 +270,31 @@ M: ast-boolean (@eval) ( ast -- )
 : null-joy ( -- ) ! empty aggregate or zero (0)
     dstack-pop*
     {
-        { [ dup quotation? ] [ empty? dstack-push ] }
-        { [ dup number? ] [ 0 = dstack-push ] }
+        { [ dup +nil+ =   ] [ drop t dstack-push ] }
+        { [ dup array?    ] [ length 0 = dstack-push ] }
+        { [ dup joy-cons? ] [ nil? dstack-push ] }
+        { [ dup number?   ] [ 0 = dstack-push ] }
         [ drop "Invalid operands for 'null'!" throw ]
     } cond ; inline
 : small-joy ( -- ) ! 0/1 elements, or numeric one/zero
     dstack-pop*
     {
-        { [ dup quotation? ] [ length [ 0 = ] [ 1 = ] bi or dstack-push ] }
-        { [ dup number? ] [ [ 0 = ] [ 1 = ] bi or dstack-push ] }
+        { [ dup +nil+ =   ] [ drop t dstack-push ] }
+        { [ dup array?    ] [ length [ 0 = ] [ 1 = ] bi or dstack-push ] }
+        { [ dup joy-cons? ] [ [ car nil? ] [ cadr nil? ] bi or dstack-push ] }
+        { [ dup number?   ] [ [ 0 = ] [ 1 = ] bi or dstack-push ] }
         [ drop "Invalid operands for 'small'!" throw ]
     } cond ; inline
 : has-joy ( -- )
     dstack-pop* dstack-pop* ! thing seq --
-    member? dstack-push ; inline
+    list>array member? dstack-push ; inline
 : in-joy ( -- )
-    dstack-pop* dstack-pop* swap ! seq thing
+    dstack-pop* dstack-pop* list>array swap ! seq thing
     member? dstack-push ; inline
 
+! ***************************************
 ! relational operators
+! ***************************************
 : >=-joy ( -- ) [ >= ] binop ; inline
 : <=-joy ( -- ) [ <= ] binop ; inline
 : <-joy ( -- ) [ < ] binop ; inline
@@ -290,8 +302,9 @@ M: ast-boolean (@eval) ( ast -- )
 : !=-joy ( -- ) [ = not ] binop ; inline
 : =-joy ( -- ) [ = ] binop ; inline    
 
+! ***************************************
 ! math operations
-
+! ***************************************
 : +-joy ( -- ) [ + ] binop ; inline
 : --joy ( -- ) [ - ] binop ; inline
 : *-joy ( -- ) [ * ] binop ; inline
@@ -307,19 +320,23 @@ M: ast-boolean (@eval) ( ast -- )
 : max-joy ( -- ) [ max ] binop ; inline
 : min-joy ( -- ) [ min ] binop ; inline
 
+! ***************************************
 ! predicate words
+! ***************************************
 : integer-joy ( -- ) [ integer? ] unop ; inline
 : char-joy ( -- ) [ [ string? ] [ length 1 = ] bi and ] unop ; inline
 : logical-joy ( -- ) [ boolean? ] unop ; inline
-! : set-joy ( -- )  :TODO:
+: set-joy ( -- ) [ array? ] unop ; inline
 : string-joy ( -- ) [ string? ] unop ; inline
-: list-joy ( -- ) [ quotation? ] unop ; inline
-: leaf-joy ( -- ) [ quotation? not ] unop ; inline
+: list-joy ( -- ) [ joy-cons? ] unop ; inline
+: leaf-joy ( -- ) [ joy-cons? not ] unop ; inline
 ! : user
 : float-joy ( -- ) [ float? ] unop ; inline
 ! : file
 
+! ***************************************
 ! file words
+! ***************************************
 : (fopen) ( mode pathname -- stream )
     dup string? [ "Not a filename!" throw ] unless swap ! pathname mode
     {
@@ -361,14 +378,13 @@ M: ast-boolean (@eval) ( ast -- )
 : fclose-joy ( -- )
     dstack-pop* dispose ; inline
 
+! **********************************
 ! combinators
-: (i-joy) ( quot -- )
-    [ (@eval) ] each ; inline 
+! **********************************
 
 : i-joy ( -- )
     dstack-pop* dup
-    quotation?
-    [ (i-joy) ] [ drop "Not a quotation!" throw ] if ; inline
+    [ joy-call ] [ drop "Not a quotation!" throw ] if ; inline
 
 : x-joy ( -- ) dup-joy i-joy ; inline
 
@@ -385,18 +401,25 @@ MACRO: preserving ( quot -- )
     do compose [ loop ] curry when ; inline
 
 : step-joy ( -- )
-    dstack-pop* dstack-pop* swap each ; inline
+    dstack-pop* dstack-pop* swap leach ; inline
 
 : fold-joy ( -- )
     dstack-pop* dstack-pop* dstack-pop* spin
     reduce ; inline
 
+: ((map-joy)) ( list quot -- cdr quot )
+    [ [ car ] dip joy-call ] [ [ cdr ] dip ] 2bi ; inline
+
+: (map-joy) ( list quot -- result )
+    over nil? [ drop ] [ ((map-joy)) (map-joy) cons ] if ; inline recursive
+
 : map-joy ( -- )
-    dstack-pop* dstack-pop* swap map
+    dstack-pop* dstack-pop* swap
+    (map-joy)
     dstack-push ; inline
 
 : times-joy ( -- )
-    dstack-pop* dstack-pop* swap each ; inline
+    dstack-pop* dstack-pop* swap leach ; inline
 
 :: (linrec) ( if-quot then-quot else1-quot else2-quot -- )
     if-quot preserving
@@ -437,7 +460,9 @@ MACRO: preserving ( quot -- )
     4 -nrot spin
     (binrec) ; inline
 
+! **********************************
 ! printing words
+! **********************************
 : put-joy ( -- )
     dstack-pop*
     {
@@ -448,7 +473,9 @@ MACRO: preserving ( quot -- )
 : putchars-joy ( -- )
     dstack-pop* write ; inline 
 
+! **********************************
 ! regenerate the environment
+! **********************************
 : default-env ( -- env )
     H{
         { "+"     [ +-joy ] }
@@ -570,8 +597,11 @@ MACRO: preserving ( quot -- )
       !  { "putch"    [ putch-joy ] }
         
     } ;
-        
-: env ( -- )
+
+! **********************************
+! actual eval
+! **********************************
+: eval-env ( -- )
     joy-env new default-env >>env
     +nil+ >>dstack
     +nil+ >>rstack
@@ -579,19 +609,21 @@ MACRO: preserving ( quot -- )
     0 >>quotation-depth
     joy set ;
 
-! actual eval 
-
 : (eval) ( string -- )
     parse-joy
     [ (@eval) ] each ; inline
 
+! now clean up the stack, in case any
+! raw ast- tuples are left on it
+! (from being removed from a quotation)
+: cleanup ( -- )
+    joy get dstack>> clone joy get swap >>rstack
+    +nil+ >>dstack
+    rstack>> lreverse
+    [ (@eval) ] leach
+    joy get +nil+ >>rstack drop ; inline
+
 : eval ( string -- )
-    env ! new environment
+    eval-env ! new environment
     (eval) ! evaluate
-    ! now clean up the stack, in case any
-    ! raw ast- tuples are left on it
-    ! (from being removed from a quotation)
-    joy get dstack>> clone joy get swap >>rstack ! copy dstack to rstack
-    +nil+ >>dstack ! clear the dstack
-    rstack>> [ (@eval) ] leach ! re-evaluate the stack
-    joy get +nil+ >>rstack joy set ; ! clear the rstack
+    cleanup ;

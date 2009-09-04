@@ -6,7 +6,7 @@ math.functions math.order strings io io.files destructors
 arrays io.directories continuations io.encodings.utf8 
 macros stack-checker fry generalizations quotations math.parser 
 locals sequences.deep compiler.units words vocabs.parser
-assocs ;
+assocs lists joy.cons ;
 IN: joy.compiler
 
 GENERIC: (compile) ( ast -- )
@@ -294,6 +294,8 @@ SYMBOL: joy
 
 ! generic eval word
 
+M: joy-cons (compile) ( ast -- ) , ; inline
+
 M: string (compile) ( ast -- ) drop ; inline
 
 M: ast-definitions (compile) ( ast -- )
@@ -322,7 +324,7 @@ M: ast-special (compile) ( ast -- ) value>> , ; inline
 
 M: ast-boolean (compile) ( ast -- ) value>> , ; inline
 
-: env ( -- )
+: compiler-env ( -- )
     joy-env new default-env >>env
     H{ } clone >>user-env
     joy set ; inline
@@ -331,4 +333,4 @@ M: ast-boolean (compile) ( ast -- ) value>> , ; inline
     [ [ (compile) ] each ] [ ] make ;
 
 : compile ( ast -- quot )
-    env @compile ;
+    compiler-env @compile ;
