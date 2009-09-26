@@ -51,7 +51,7 @@ GENERIC: (@compile) ( ast -- )
     ]
     if* ; inline
 
-: @compile ( ast -- quot )
+: @compile ( jc -- quot )
     [ [ (@compile) ] leach ] [ ] make ; inline
 
 : do-push ( obj -- ) [ dstack-push ] curry % ; inline
@@ -79,31 +79,29 @@ M: ast-boolean (@compile) ( ast -- ) value>> do-push ; inline
 ! ******************************
 
 : joy-call ( jc -- )
-    dup compiled-quot>> 
-    [ dup @compile >>compiled-quot ] unless
-    compiled-quot>> call ; inline
+    dup +nil+ equal?
+    [
+        dup compiled-quot>> 
+        [ dup @compile >>compiled-quot ] unless
+        compiled-quot>> call
+    ] unless ; inline
 
 : joy-keep ( x quot -- x )
     over '[ _ joy-call ] call dip ; inline
-
-: joy-each ( quot -- )
-    joy get dstack>> clone joy get swap >>rstack
-    +nil+ >>dstack dup rstack>>
-    
 
 ! ******************************
 ! evaluation
 ! ******************************
 
 : user-eval ( user-word -- )
-    [ (@eval) ] each ; inline
+    [ (@eval) ] each ; inline recursive
 
 : eval-identifier ( identifier -- )
     {
         { [ dup joy get env>>      at ] [ joy get env>> at call ] }
         { [ dup joy get user-env>> at ] [ joy get user-env>> at user-eval ] }
         [ 2drop "Invalid word!" throw ]
-    } cond ; inline
+    } cond ; inline recursive
 
 : add-word-to-user-env ( quot name -- )
     joy get user-env>> set-at ;
@@ -116,34 +114,34 @@ M: ast-boolean (@compile) ( ast -- ) value>> do-push ; inline
 ! generic eval word
 ! ******************************
 
-M: object (@eval) ( obj -- ) dstack-push ; inline
+M: object (@eval) ( obj -- ) dstack-push ; inline recursive
 
 M: ast-definitions (@eval) ( ast -- )
-    definitions>> [ ast-definition? ] deep-filter [ (@eval) ] each ; inline
+    definitions>> [ ast-definition? ] deep-filter [ (@eval) ] each ; inline recursive
 
 M: ast-definition (@eval) ( ast -- )
-    [ body>> ] [ name>> ] bi add-word-to-user-env ; inline
+    [ body>> ] [ name>> ] bi add-word-to-user-env ; inline recursive
 
 M: ast-string (@eval) ( ast -- )
-    string>> dstack-push ; inline
+    string>> dstack-push ; inline recursive
 
 M: ast-number (@eval) ( ast -- )
-    num>> dstack-push ; inline
+    num>> dstack-push ; inline recursive
 
 M: ast-character (@eval) ( ast -- )
-    char>> dstack-push ; inline
+    char>> dstack-push ; inline recursive
 
 M: ast-identifier (@eval) ( ast -- )
-    name>> eval-identifier ; inline
+    name>> eval-identifier ; inline recursive
 
 M: ast-quotation (@eval) ( ast -- )
-    body>> make-quot dstack-push ; inline
+    body>> make-quot dstack-push ; inline recursive
 
 M: ast-special (@eval) ( ast -- )
-    value>> eval-identifier ; inline
+    value>> eval-identifier ; inline recursive
 
 M: ast-boolean (@eval) ( ast -- )
-    value>> dstack-push ; inline
+    value>> dstack-push ; inline recursive
 
 ! *************************************
 ! helper functions
@@ -176,12 +174,16 @@ M: ast-boolean (@eval) ( ast -- )
 
 : (dip-joy) ( quot -- )
     dstack-pop* ! pop TOS
-    [ joy-call ] dip
+    [ call ] dip
     dstack-push ; inline ! push back on to TOS
 
 : dip-joy ( -- )
-    dstack-pop* dup joy-cons?
-    [ (dip-joy) ] [ drop "Not a quotation!" throw ] if ; inline
+    dstack-pop*
+    {
+        { [ dup joy-cons?  ] [ '[ _ joy-call ] (dip-joy) ] }
+        { [ dup quotation? ] [ (dip-joy) ] }
+        [ drop "Not a quotation!" throw ]
+    } cond ; inline
 
 : rollup-joy ( -- ) ! X Y Z -- Z X Y (1 2 3 -- 3 1 2)
     dstack-pop* dstack-pop* dstack-pop* ! z y x (3 2 1)
@@ -301,7 +303,7 @@ M: ast-boolean (@eval) ( ast -- )
 : of-joy ( -- ) [ swap [ cdr ] times car ] binop ; inline
 : at-joy ( -- ) [ [ cdr ] times car ] binop ; inline
 : size-joy ( -- ) [ llength ] unop ; inline
-: uncons-joy ( -- ) [ [ car ] [ cdr ] bi ] unop dstack-push ; inline
+: uncons-joy ( -- ) dstack-pop* [ cdr ] [ car ] bi (@eval) dstack-push ; inline    
 : drop-joy ( -- ) [ [ cdr ] times ] binop ; inline
 : take-joy ( -- ) [ head ] binop ; inline
 : concat-joy ( -- ) [ append ] binop ; inline
@@ -312,7 +314,7 @@ M: ast-boolean (@eval) ( ast -- )
 : null-joy ( -- ) ! empty aggregate or zero (0)
     dstack-pop*
     {
-        { [ dup +nil+ =   ] [ drop t dstack-push ] }
+        { [ dup +nil+ =   ] [ dstack-push ] }
         { [ dup array?    ] [ length 0 = dstack-push ] }
         { [ dup joy-cons? ] [ nil? dstack-push ] }
         { [ dup number?   ] [ 0 = dstack-push ] }
@@ -429,15 +431,19 @@ M: ast-boolean (@eval) ( ast -- )
 
 : x-joy ( -- ) dup-joy i-joy ; inline
 
-MACRO: preserving ( quot -- )
-    [ infer in>> length ] joy-keep '[ _ ndup @ ] ;
+: preserving ( quot -- )
+    joy get dstack>> clone joy get swap >>rstack drop ! quot --
+    '[ _ joy-call ] call ! -- 
+    joy get dstack>> lreverse [ joy get [ cons ] change-rstack ] leach
+    joy get rstack>> clone joy get swap >>dstack
+    +nil+ >>rstack drop ; inline
 
 : ifte-joy ( -- )
-    dstack-pop* '[ _ joy-call ] dstack-pop* '[ _ joy-call ] dstack-pop* spin ! pred t f
-    [ preserving ] 2dip if ; inline
-
+    dstack-pop* '[ _ joy-call ] dstack-pop* '[ _ joy-call ] dstack-pop* ! f t pred
+    preserving drop dstack-pop* spin if ; inline
+    
 : while-joy ( -- )
-    dstack-pop* dstack-pop*
+    dstack-pop* '[ _ joy-call ] dstack-pop* '[ _ joy-call ]
     [ joy-keep ] curry [ swap ] compose
     do compose [ loop ] curry when ; inline
 
@@ -458,7 +464,7 @@ MACRO: preserving ( quot -- )
     dstack-pop* '[ _ joy-call ] dstack-pop* swap (map-joy) ; inline
 
 : times-joy ( -- )
-    dstack-pop* dstack-pop* swap leach ; inline
+    dstack-pop* '[ _ joy-call ] dstack-pop* swap times ; inline
 
 :: (linrec) ( if-quot then-quot else1-quot else2-quot -- )
     if-quot preserving
