@@ -270,9 +270,9 @@ SYMBOL: joy
 
 : compile-identifier ( ident -- )
     dup joy get env>> at
-    [ call drop ]
+    [ call( -- ) drop ]
     [ joy get user-env>> at
-      [ call , ]
+      [ call( -- ) , ]
       [ ": Unknown word!" append throw ] if*
     ] if* ; inline
 

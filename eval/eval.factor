@@ -98,9 +98,9 @@ M: ast-boolean (@compile) ( ast -- ) value>> do-push ; inline
 
 : eval-identifier ( identifier -- )
     {
-        { [ dup joy get env>>      at ] [ joy get env>> at call ] }
+        { [ dup joy get env>>      at ] [ joy get env>> at call( -- ) ] }
         { [ dup joy get user-env>> at ] [ joy get user-env>> at user-eval ] }
-        [ 2drop "Invalid word!" throw ]
+        [ drop "Invalid word!" throw ]
     } cond ; inline recursive
 
 : add-word-to-user-env ( quot name -- )
@@ -251,7 +251,7 @@ M: ast-boolean (@eval) ( ast -- )
 : false-joy ( -- ) f dstack-push ; inline
 : true-joy  ( -- ) t dstack-push ; inline
 
-: rand-joy ( -- ) 1 32767 [a,b] random dstack-push ; inline
+: rand-joy ( -- ) 32767 random dstack-push ; inline
 
 : id-joy ( -- ) ; inline
 
